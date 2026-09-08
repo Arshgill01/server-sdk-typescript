@@ -15,7 +15,7 @@ export interface paths {
         put?: never;
         /**
          * Create Call
-         * @description Create an asynchronous call. Use `result_schema` and `recipient_result_schema` to ask CALL-E to extract structured JSON results from terminal call evidence.
+         * @description Create an asynchronous call. Use `result_schema` and `recipient_result_schema` to ask CALL-E to extract structured JSON results from terminal call evidence. The default outbound line supports one phone number per task. Batch calls require an eligible purchased number selected as the account default outbound number; otherwise creation returns `422 call_not_ready`. Each authenticated user can create up to 20 call plans in any rolling 24-hour period; additional requests return `429 rate_limit_exceeded` before planning begins.
          */
         post: operations["createCall"];
         delete?: never;
@@ -378,7 +378,7 @@ export interface components {
         CreateCallRequest: {
             /** @description Natural-language instruction for the call task. Include the goal, relevant details the voice agent should know, and the exact information you want collected. */
             task: string;
-            /** @description Optional explicit recipients for this call task. Omit it when the task text already contains the phone targets CALL-E should use. */
+            /** @description Optional explicit recipients for this call task. Omit it when the task text already contains the phone targets CALL-E should use. The default outbound line permits one phone number in total across all recipients. Multiple targets require an eligible purchased outbound number; this also applies to targets inferred from task text. */
             recipients?: components["schemas"]["CallTaskRecipientRequest"][] | null;
             /**
              * @description Optional JSON Schema object that defines the structured result CALL-E should extract for the whole call task.
@@ -631,7 +631,7 @@ export interface components {
         };
         APIError: {
             /** @enum {string} */
-            code: "invalid_request" | "unauthorized" | "forbidden" | "rate_limit_exceeded" | "insufficient_balance" | "unsupported_region" | "unsupported_language" | "recipient_blocked" | "policy_violation" | "call_not_ready" | "no_recipients" | "invalid_recipient" | "invalid_phone" | "result_schema_invalid" | "recipient_result_schema_invalid" | "idempotency_conflict" | "goal_not_published" | "goal_not_executable" | "goal_not_ready" | "schema_override_not_allowed" | "variables_invalid" | "provider_unavailable" | "internal_error" | "not_found";
+            code: "invalid_request" | "unauthorized" | "forbidden" | "rate_limit_exceeded" | "account_concurrency_exceeded" | "account_concurrency_unavailable" | "llm_token_budget_exceeded" | "llm_token_budget_unavailable" | "insufficient_balance" | "unsupported_region" | "unsupported_language" | "recipient_blocked" | "policy_violation" | "call_not_ready" | "no_recipients" | "invalid_recipient" | "invalid_phone" | "result_schema_invalid" | "recipient_result_schema_invalid" | "idempotency_conflict" | "goal_not_published" | "goal_not_executable" | "goal_not_ready" | "schema_override_not_allowed" | "variables_invalid" | "provider_unavailable" | "internal_error" | "not_found";
             message: string;
             details: {
                 [key: string]: unknown;
@@ -652,7 +652,7 @@ export interface components {
         };
     };
     parameters: {
-        /** @description Stable caller-provided key used to make create-call retries safe. Reusing the same key with the same request returns the original call instead of creating a duplicate. */
+        /** @description Stable caller-provided key used to make create-call retries safe. Reusing the same key with the same request returns the original call instead of creating a duplicate. A persisted creation failure replays its original HTTP status and error body; use a new key for a new attempt after resolving the error. While creation is still in progress, a duplicate returns `409 idempotency_conflict` with `details.reason_code=creation_in_progress`. A different request using the same key returns `409 idempotency_conflict`. */
         IdempotencyKey: string;
         /**
          * @description Required business-stable identity for one logical Goal Run, scoped to the authenticated
@@ -710,7 +710,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Stable caller-provided key used to make create-call retries safe. Reusing the same key with the same request returns the original call instead of creating a duplicate. */
+                /** @description Stable caller-provided key used to make create-call retries safe. Reusing the same key with the same request returns the original call instead of creating a duplicate. A persisted creation failure replays its original HTTP status and error body; use a new key for a new attempt after resolving the error. While creation is still in progress, a duplicate returns `409 idempotency_conflict` with `details.reason_code=creation_in_progress`. A different request using the same key returns `409 idempotency_conflict`. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -736,8 +736,38 @@ export interface operations {
             403: components["responses"]["ErrorResponse"];
             409: components["responses"]["ErrorResponse"];
             422: components["responses"]["ErrorResponse"];
-            429: components["responses"]["ErrorResponse"];
+            /** @description A call-plan rate limit, account concurrency limit (`account_concurrency_exceeded`), or LLM token budget (`llm_token_budget_exceeded`) was reached. Account admission is checked before planning. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "rate_limit_exceeded",
+                     *         "message": "The 24-hour call plan limit has been reached.",
+                     *         "details": {
+                     *           "limit": 20,
+                     *           "window_hours": 24,
+                     *           "count": 20
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             500: components["responses"]["ErrorResponse"];
+            /** @description The provider or an account control is unavailable (`provider_unavailable`, `account_concurrency_unavailable`, or `llm_token_budget_unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     getCall: {
