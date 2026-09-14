@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CalleClient, CalleAPIError, CalleTimeoutError } from "../src/index.js";
+import { CalleClient, CalleAPIError, CalleConnectionError, CalleTimeoutError } from "../src/index.js";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
@@ -173,8 +173,70 @@ describe("CalleClient calls", () => {
     const fetchMock = vi.fn(async () => jsonResponse(queued));
     const client = new CalleClient({ apiKey: "key_test", baseUrl: "https://api.heycall-e.com", fetch: fetchMock });
 
-    await expect(client.calls.waitForResult("call_123", { intervalMs: 1, timeoutMs: 2 })).rejects.toBeInstanceOf(
-      CalleTimeoutError
-    );
+    await expect(client.calls.waitForResult("call_123", { intervalMs: 1, timeoutMs: 2 })).rejects.toMatchObject({
+      name: "CalleTimeoutError",
+      callId: "call_123"
+    } satisfies Partial<CalleTimeoutError>);
+  });
+
+  it("maps a rejected fetch to CalleConnectionError", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    const client = new CalleClient({ apiKey: "key_test", baseUrl: "https://api.heycall-e.com", fetch: fetchMock });
+
+    await expect(
+      client.calls.create({
+        task: "Call.",
+        recipient: { phone: "+14155550100", region: "US", locale: "en-US" }
+      })
+    ).rejects.toBeInstanceOf(CalleConnectionError);
+  });
+
+  it("attaches callId when createAndWait GET rejects after create", async () => {
+    const queued = { ...completedCall, status: "queued", structured_result: null, completed_at: null };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(queued))
+      .mockRejectedValueOnce(new TypeError("fetch failed"));
+    const client = new CalleClient({ apiKey: "key_test", baseUrl: "https://api.heycall-e.com", fetch: fetchMock });
+
+    await expect(
+      client.calls.createAndWait(
+        {
+          task: "Call.",
+          recipient: { phone: "+14155550100", region: "US", locale: "en-US" }
+        },
+        { intervalMs: 1, timeoutMs: 500 }
+      )
+    ).rejects.toMatchObject({
+      name: "CalleConnectionError",
+      callId: "call_123"
+    } satisfies Partial<CalleConnectionError>);
+  });
+
+  it("attaches callId when createAndWait GET returns an API error", async () => {
+    const queued = { ...completedCall, status: "queued", structured_result: null, completed_at: null };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(queued))
+      .mockResolvedValueOnce(
+        jsonResponse({ error: { code: "internal_error", message: "Bad gateway." } }, { status: 502 })
+      );
+    const client = new CalleClient({ apiKey: "key_test", baseUrl: "https://api.heycall-e.com", fetch: fetchMock });
+
+    await expect(
+      client.calls.createAndWait(
+        {
+          task: "Call.",
+          recipient: { phone: "+14155550100", region: "US", locale: "en-US" }
+        },
+        { intervalMs: 1, timeoutMs: 500 }
+      )
+    ).rejects.toMatchObject({
+      name: "CalleAPIError",
+      callId: "call_123",
+      status: 502
+    } satisfies Partial<CalleAPIError>);
   });
 });

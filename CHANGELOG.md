@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Clarify placeholder API keys and redaction of credentials and private call data in SDK documentation.
 
+### Fixed
+
+- `createAndWait` attaches `callId` when the wait-phase GET fails after a
+  successful create.
+- Fetch rejections are mapped to `CalleConnectionError` instead of a raw
+  `TypeError`.
+
 ## [0.7.1] - 2026-09-03
 
 ### Added
