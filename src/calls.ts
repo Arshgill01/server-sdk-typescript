@@ -317,7 +317,8 @@ export class CalleCalls {
       ) {
         throw attachCallId(error, call.id);
       }
-      throw error;
+      const detail = error instanceof Error && error.message ? error.message : "unknown error";
+      throw new CalleConnectionError(`CALL-E wait failed: ${detail}`, call.id);
     }
   }
 }

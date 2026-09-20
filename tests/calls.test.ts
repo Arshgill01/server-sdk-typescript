@@ -215,6 +215,25 @@ describe("CalleClient calls", () => {
     } satisfies Partial<CalleConnectionError>);
   });
 
+  it.each(["body stream failure", "invalid JSON"])("preserves callId after %s", async (failure) => {
+    const response = failure === "invalid JSON"
+      ? new Response("not JSON", { headers: { "content-type": "application/json" } })
+      : new Response(new ReadableStream({
+          start(controller) { controller.error(new TypeError("body read failed")); }
+        }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ...completedCall, status: "queued" }))
+      .mockResolvedValueOnce(response);
+    const client = new CalleClient({ apiKey: "key_test", baseUrl: "https://api.heycall-e.com", fetch: fetchMock });
+
+    await expect(client.calls.createAndWait({ task: "Call." })).rejects.toMatchObject({
+      name: "CalleConnectionError",
+      callId: "call_123"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([request]) => request.method)).toEqual(["POST", "GET"]);
+  });
+
   it("attaches callId when createAndWait GET returns an API error", async () => {
     const queued = { ...completedCall, status: "queued", structured_result: null, completed_at: null };
     const fetchMock = vi

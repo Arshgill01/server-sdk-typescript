@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `createAndWait` attaches `callId` when the wait-phase GET fails after a
-  successful create.
+  successful create, including response body and JSON parsing failures.
 - Fetch rejections are mapped to `CalleConnectionError` instead of a raw
   `TypeError`.
 
