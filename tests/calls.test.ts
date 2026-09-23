@@ -10,60 +10,77 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 
 const completedCall = {
   id: "call_123",
-  object: "call_task",
+  call_id: "billing-call-123",
+  object: "call",
   status: "completed",
+  call_outcome: "completed",
+  result_status: "available",
+  transcript: [],
   task: "Call.",
-  recipients: [
-    {
-      id: "rcp_123",
-      phones: ["+14155550100"],
-      region: "US",
-      locale: "en-US",
-      status: "completed",
-      structured_result: { can_attend: "yes" },
-      summary: "Recipient can attend.",
-      attempts: [
-        {
-          id: "att_123",
-          phone: "+14155550100",
-          status: "completed",
-          started_at: "2026-05-31T00:00:10Z",
-          completed_at: "2026-05-31T00:01:00Z",
-          summary: "Recipient can attend.",
-          transcript_turns: [{ offset_seconds: 2, speaker: "user", text: "Yes." }],
-          provider_call_id: "provider_123",
-          failure_code: null,
-          failure_message: null
-        }
-      ]
-    }
-  ],
-  structured_result: { completed_count: 1 },
-  summary: "Done.",
-  task_completed: true,
-  completion_confidence: { score: 0.92, label: "high" },
-  evidence: ["The recipient said yes."],
+  phone: "+14155550100", region: "US", locale: "en-US",
+  result: { completed_count: 1 }, error: null,
   metadata: { workflow_run_id: "wf_123" },
-  failure_code: null,
-  failure_message: null,
   created_at: "2026-05-31T00:00:00Z",
   completed_at: "2026-05-31T00:01:00Z"
 };
 
 describe("CalleClient calls", () => {
+  it.each([null, "billing-call-123"])("keeps Billing callId separate from the API id: %s", async (callId) => {
+    const client = new CalleClient({apiKey:"test",fetch:async(request)=>{
+      expect(new URL(request.url).pathname).toBe("/v2/calls/call_123");
+      return jsonResponse({...completedCall, call_id: callId});
+    }});
+    const call = await client.calls.get("call_123");
+    expect(call.id).toBe("call_123");
+    expect(call.callId).toBe(callId);
+  });
+  it("omits optional target hints and returns the resolved target", async () => {
+    const client = new CalleClient({apiKey:"test",fetch:async(request)=>{
+      const body = await request.json();
+      expect(body).not.toHaveProperty("region");
+      expect(body).not.toHaveProperty("locale");
+      return jsonResponse(completedCall);
+    }});
+    const call = await client.calls.create({task:"Ask in English.",phone:"+14155550100",
+      resultSchema:{type:"object",properties:{},additionalProperties:false}}, {idempotencyKey:"infer-target"});
+    expect(call.region).toBe("US");
+    expect(call.locale).toBe("en-US");
+  });
+  it("returns observed transcript turns even when the business result is unavailable", async () => {
+    const transcript = [{speaker:"bot",offset_seconds:0,text:"Hello."},
+      {speaker:"unknown",offset_seconds:null,text:"Unattributed words."}];
+    const client = new CalleClient({apiKey:"test",fetch:async()=>jsonResponse({
+      ...completedCall,result_status:"unavailable",result:null,error:null,transcript,
+    })});
+    const call = await client.calls.waitForResult("call_123",{intervalMs:1,timeoutMs:100});
+    expect(call.result).toBeNull();
+    expect(call.transcript).toEqual(transcript);
+  });
+  it("rejects removed scheduling input instead of silently placing an immediate call", async () => {
+    const fetchMock = vi.fn();
+    const input = {
+      task: "Call.", phone: "+14155550100", region: "US", locale: "en-US",
+      resultSchema: { type: "object", additionalProperties: false, properties: {} },
+      scheduledAt: "2026-10-01T10:00:00Z",
+    };
+    const client = new CalleClient({ apiKey: "test", fetch: fetchMock });
+    await expect(client.calls.create(input, { idempotencyKey: "schedule" })).rejects.toThrow("scheduledAt");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("uses the production API base URL by default", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
-      expect(request.url).toBe("https://api.heycall-e.com/v1/calls");
+      expect(request.url).toBe("https://api.heycall-e.com/v2/calls");
       return jsonResponse(completedCall);
     });
     const client = new CalleClient({ apiKey: "key_test", fetch: fetchMock });
 
     await client.calls.create({
       task: "Call.",
-      recipient: { phone: "+14155550100", region: "US", locale: "en-US" },
-      resultSchema: { type: "object", properties: {} }
-    });
+      phone: "+14155550100", region: "US", locale: "en-US",
+      resultSchema: { type: "object", additionalProperties: false, properties: {} }
+    }, { idempotencyKey: "wf_123" });
   });
 
   it("creates calls with auth, idempotency headers, and structured result schemas", async () => {
@@ -74,9 +91,8 @@ describe("CalleClient calls", () => {
       expect(request.headers.get("idempotency-key")).toBe("wf_123");
       expect(await request.json()).toMatchObject({
         task: "Call.",
-        recipients: [{ phones: ["+14155550100"], region: "US", locale: "en-US" }],
-        result_schema: { type: "object", properties: { completed_count: { type: "integer" } } },
-        recipient_result_schema: { type: "object", properties: { can_attend: { type: "string" } } },
+        phone: "+14155550100", region: "US", locale: "en-US",
+        result_schema: { type: "object", additionalProperties: false, properties: { completed_count: { type: "integer" } } },
         webhook_url: "https://example.com/webhook"
       });
       return jsonResponse(completedCall);
@@ -86,35 +102,36 @@ describe("CalleClient calls", () => {
     const call = await client.calls.create(
       {
         task: "Call.",
-        recipient: { phone: "+14155550100", region: "US", locale: "en-US" },
-        resultSchema: { type: "object", properties: { completed_count: { type: "integer" } } },
-        recipientResultSchema: { type: "object", properties: { can_attend: { type: "string" } } },
+        phone: "+14155550100", region: "US", locale: "en-US",
+        resultSchema: { type: "object", additionalProperties: false, properties: { completed_count: { type: "integer" } } },
         webhookUrl: "https://example.com/webhook"
       },
       { idempotencyKey: "wf_123" }
     );
 
     expect(call.id).toBe("call_123");
-    expect(call.structuredResult).toEqual({ completed_count: 1 });
-    expect(call.taskCompleted).toBe(true);
-    expect(call.completionConfidence).toEqual({ score: 0.92, label: "high" });
-    expect(call.evidence).toEqual(["The recipient said yes."]);
-    expect(call.recipients[0]?.structuredResult).toEqual({ can_attend: "yes" });
-    expect(call.recipients[0]?.attempts[0]?.transcriptTurns).toEqual([{ offset_seconds: 2, speaker: "user", text: "Yes." }]);
-    expect("resultValidation" in call).toBe(false);
+    expect(call.result).toEqual({ completed_count: 1 });
+    expect(call.error).toBeNull();
+    expect("structuredResult" in call).toBe(false);
   });
 
-  it("creates task-only calls without explicit recipients or schemas", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      expect(await request.json()).toEqual({ task: "Call +14155550100." });
-      return jsonResponse(completedCall);
+  it("rejects an empty idempotency key before making a request", async () => {
+    const fetchMock = vi.fn();
+    const client = new CalleClient({ apiKey: "test", fetch: fetchMock });
+    await expect(client.calls.create({ task: "Call.", phone: "+14155550100", region: "US", locale: "en-US", resultSchema: { type: "object", additionalProperties: false, properties: {} } }, { idempotencyKey: " " })).rejects.toThrow("idempotencyKey");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("cancels through the v2 endpoint without a technical error", async () => {
+    const fetchMock = vi.fn(async (request: Request) => {
+      expect(request.method).toBe("POST");
+      expect(request.url).toBe("https://api.heycall-e.com/v2/calls/call_123/cancel");
+      return jsonResponse({ ...completedCall, status: "canceled", call_outcome: null,
+        result_status: "not_applicable", result: null, error: null });
     });
-    const client = new CalleClient({ apiKey: "key_test", baseUrl: "https://api.heycall-e.com", fetch: fetchMock });
-
-    const call = await client.calls.create({ task: "Call +14155550100." });
-
-    expect(call.status).toBe("completed");
+    const call = await new CalleClient({ apiKey: "test", fetch: fetchMock }).calls.cancel("call_123");
+    expect(call.resultStatus).toBe("not_applicable");
+    expect(call.error).toBeNull();
   });
 
   it("maps API errors into CalleAPIError", async () => {
@@ -129,34 +146,35 @@ describe("CalleClient calls", () => {
     await expect(
       client.calls.create({
         task: "Call.",
-        recipient: { phone: "+14155550100", region: "US", locale: "en-US" },
-        resultSchema: { type: "object", properties: {} }
-      })
+        phone: "+14155550100", region: "US", locale: "en-US",
+        resultSchema: { type: "object", additionalProperties: false, properties: {} }
+      }, { idempotencyKey: "wf_123" })
     ).rejects.toMatchObject({
       code: "idempotency_conflict",
       status: 409
     } satisfies Partial<CalleAPIError>);
   });
 
-  it("waits until a call reaches completed", async () => {
-    const queued = { ...completedCall, status: "queued", structured_result: null, completed_at: null };
+  it("waits through completed execution until a result is persisted", async () => {
+    const queued = { ...completedCall, status: "queued", call_outcome: null, result_status: "pending", result: null, completed_at: null };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(queued))
+      .mockResolvedValueOnce(jsonResponse({ ...completedCall, result_status: "pending", result: null }))
       .mockResolvedValueOnce(jsonResponse(completedCall));
     const client = new CalleClient({ apiKey: "key_test", baseUrl: "https://api.heycall-e.com", fetch: fetchMock });
 
     const call = await client.calls.waitForResult("call_123", { intervalMs: 1, timeoutMs: 500 });
 
     expect(call.status).toBe("completed");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("returns failed terminal calls instead of throwing", async () => {
+  it.each(["no_answer", "busy", "declined"])("finishes a %s call with no business result or error", async (outcome) => {
     const failed = {
       ...completedCall,
-      status: "failed",
-      failure_code: "no_answer",
+      status: "completed", call_outcome: outcome, result_status: "unavailable",
+      result: null, error: null,
       completed_at: "2026-05-31T00:01:00Z"
     };
     const fetchMock = vi.fn(async () => jsonResponse(failed));
@@ -164,12 +182,19 @@ describe("CalleClient calls", () => {
 
     const call = await client.calls.waitForResult("call_123", { intervalMs: 1, timeoutMs: 500 });
 
-    expect(call.status).toBe("failed");
-    expect(call.failureCode).toBe("no_answer");
+    expect(call.status).toBe("completed");
+    expect(call.callOutcome).toBe(outcome);
+    expect(call.resultStatus).toBe("unavailable");
+    expect(call.error).toBeNull();
+  });
+
+  it("treats an empty result as ready", async () => {
+    const client = new CalleClient({ apiKey: "test", fetch: async () => jsonResponse({ ...completedCall, result_status: "available", result: {} }) });
+    expect((await client.calls.waitForResult("call_123", { intervalMs: 1, timeoutMs: 100 })).result).toEqual({});
   });
 
   it("raises CalleTimeoutError when wait timeout is reached", async () => {
-    const queued = { ...completedCall, status: "queued", structured_result: null, completed_at: null };
+    const queued = { ...completedCall, status: "queued", call_outcome: null, result_status: "pending", result: null, completed_at: null };
     const fetchMock = vi.fn(async () => jsonResponse(queued));
     const client = new CalleClient({ apiKey: "key_test", baseUrl: "https://api.heycall-e.com", fetch: fetchMock });
 

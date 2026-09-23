@@ -9,6 +9,11 @@ TypeScript server SDK for the CALL-E Developer API.
 Use this SDK from backend services, workers, and other trusted server
 environments. Do not expose CALL-E API keys in browser code.
 
+SDK 1.0 uses the single-target Calls API and the same result model as Goal Runs. A required
+closed scalar-object result schema defines the business fields. SDK wait helpers
+continue while `result_status` is `pending`, even after execution reaches `completed`.
+Empty `{}` is a ready result. Webhook data matches the persisted GET snapshot.
+
 ## Documentation
 
 - Developer docs: <https://docs.heycall-e.com/>
@@ -20,7 +25,7 @@ environments. Do not expose CALL-E API keys in browser code.
 
 ## SDK surface
 
-- `client.calls` creates, reads, and polls call tasks and lists call events.
+- `client.calls` creates, reads, polls and cancels Calls and lists call events.
 - `client.goals` lists and reads published Goals and runs them with typed
   results.
 - The `calle` CLI supports common Calls and Goals workflows from scripts and
@@ -33,7 +38,7 @@ environments. Do not expose CALL-E API keys in browser code.
 Install the stable package from npm:
 
 ```bash
-pnpm add @call-e/calle
+pnpm add @call-e/calle@1.0.0
 ```
 
 Use a local checkout for development and package smoke tests:
@@ -82,7 +87,7 @@ other fields and replace both the task and recipient phone:
 {
   "status": "completed",
   "task": "[REDACTED]",
-  "recipients": [{"phones": ["[REDACTED]"]}]
+  "phone": "[REDACTED]"
 }
 ```
 
@@ -120,13 +125,16 @@ The Goal example performs a real call. Use an API key, Goal, phone number, and
 idempotency key for the selected environment. Persist and reuse the same key
 when retrying the same logical request.
 
-Run the CLI from npm with `npx`:
+Run the installed CLI:
 
 ```bash
-npx @call-e/calle@latest calls create \
+npx @call-e/calle@1.0.0 calls create \
   --api-key "$CALLE_API_KEY" \
   --base-url "https://api.heycall-e.com" \
-  --phone "+14155550100" \
+  --phone "<AUTHORIZED_E164_PHONE>" \
+  --region US --locale en-US \
+  --result-schema '{"type":"object","properties":{"confirmed":{"type":"boolean"}},"required":["confirmed"],"additionalProperties":false}' \
+  --idempotency-key "hearing-check:example:v1" \
   --task "Call this person and ask whether they can hear clearly." \
   --wait \
   --json
@@ -141,7 +149,7 @@ developer events returned by the call events API.
 Query an existing call:
 
 ```bash
-npx @call-e/calle@latest calls get call_123 --api-key "$CALLE_API_KEY" --json
+npx @call-e/calle@1.0.0 calls get call_123 --json
 ```
 
 Run the webhook receiver example:
@@ -202,9 +210,9 @@ if (run.result !== null) {
 Run the same published Goal through the CLI:
 
 ```bash
-npx @call-e/calle@latest goals run \
+npx @call-e/calle@1.0.0 goals run \
   --goal-id "goal_delivery_confirmation" \
-  --phone "+14155550100" \
+  --phone "<AUTHORIZED_E164_PHONE>" \
   --variables '{"customer_name":"Taylor","order_reference":"ORD-8472","delivery_window":"July 24, 2:00-4:00 PM"}' \
   --idempotency-key "delivery:ORD-8472:confirm-window:v1" \
   --wait \
@@ -212,47 +220,60 @@ npx @call-e/calle@latest goals run \
 ```
 
 Persist the idempotency key before the first request and reuse it for network
-retries. `waitForResult` returns when either `result` or `error` is non-null;
+retries. `waitForResult` returns when `result_status` is no longer `pending`;
 an execution `status` of `completed` can still be waiting for result
 materialization.
 
-The generic one-shot call API remains available independently:
+## Migration to SDK 1.0
 
-```ts
-import { CalleClient } from "@call-e/calle";
+The `calls` wrapper now submits one explicit phone to `/v2/calls` and requires
+an idempotency key. Keep the key for retries. The backend continues serving
+legacy integrations until their planned retirement at the end of 2026; keep
+SDK 0.7.x for historical legacy call IDs. Upgrade Goal Run integrations to 1.0
+as well: old wait helpers can time out when both `result` and `error` are null.
 
-const client = new CalleClient({
-  apiKey: process.env.CALLE_API_KEY!,
-  baseUrl: "https://api.heycall-e.com"
-});
-
-const call = await client.calls.createAndWait(
-  {
-    task: "Call each recipient and ask whether they can attend Friday lunch in San Francisco.",
-    recipients: [{ phones: ["+14155550100"], region: "US", locale: "en-US" }],
-    resultSchema: {
-      type: "object",
-      required: ["completed_count"],
-      properties: {
-        completed_count: { type: "integer" }
-      }
-    },
-    recipientResultSchema: {
-      type: "object",
-      required: ["can_attend"],
-      properties: {
-        can_attend: { type: "string", enum: ["yes", "no", "unknown"] }
-      }
-    },
-    metadata: { workflow_run_id: "wf_123" }
-  },
-  { idempotencyKey: "wf_123_friday_lunch" }
-);
-
-console.log(call.status, call.structuredResult);
-console.log(call.taskCompleted, call.completionConfidence, call.evidence);
-console.log(call.recipients[0]?.structuredResult);
+```typescript
+const call = await client.calls.createAndWait({
+  task: "Ask whether Friday lunch is confirmed.",
+  phone: "<AUTHORIZED_E164_PHONE>", region: "US", locale: "en-US",
+  resultSchema: {
+    type: "object", additionalProperties: false, required: ["answer"],
+    properties: { answer: { type: "string", enum: ["yes", "no", "unknown"] } }
+  }
+}, { idempotencyKey: "lunch:friday:confirmation:v1" });
+if (call.error === null) console.log(call.result);
+else console.log(call.error);
+// Cancel a queued call before provider submission:
+// await client.calls.cancel(callId);
 ```
+
+Replace `recipient` / `recipients` with `phone` and optional `region` and `locale`.
+Define the required `result_schema` (`resultSchema` in TypeScript) using Goal's
+`calle.result.scalar-object.v1` profile: at most 32 scalar properties and
+`additionalProperties: false`. Flatten old nested fields; arrays and null values
+are unsupported. Old `structured_result`, `result_error`, summary,
+confidence and provider attempt fields are removed. Request business summaries or
+completion flags explicitly as scalar fields in the schema when needed.
+The Calls API does not support batch, scheduled or recurring calls.
+
+Calls and Goal Runs always expose `transcript`, an array of recorded turns with
+`speaker` (`bot`, `user`, `unknown`), nullable `offset_seconds`, and `text`.
+Turn keys retain the HTTP names. Before execution ends or without available
+transcript, the array is empty. A pending, unavailable or failed business result
+does not remove an available terminal transcript. Webhook data uses the same shape.
+
+The returned object is `call`. Consume `result` and `error` exactly as for Goal Runs.
+Poll while result_status is pending (resultStatus in TypeScript). No-answer, busy
+and declined are ordinary call_outcome values (callOutcome in TypeScript).
+Unavailable business evidence uses result_status=unavailable and error=null.
+Explicit schema-valid task fallbacks remain results. Technical failures use error.
+Cancellation uses result_status=not_applicable and no error. GET reads committed state and
+terminal webhooks contain the same ready snapshot. Deduplicate by event id.
+
+Cancellation returns `409 call_cannot_cancel` after provider submission begins.
+Calls accept immediate execution only. If authorization expires after submission,
+`error.detail_code=authorization_expired` means the provider may still complete the call; do not
+create an automatic replacement call.
 
 ## Error handling
 

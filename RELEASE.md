@@ -77,7 +77,7 @@ pnpm run example:goal-run
 This smoke test creates a real phone call. Use an authorized test number and a
 new idempotency key for a new logical test. Reuse the same key only when
 retrying that exact request. Record the returned Goal Run id and verify that
-exactly one of `result` or `error` is non-null.
+`result_status` is no longer `pending`; an unavailable result may have both `result` and `error` null.
 
 ## Post-publish verification
 

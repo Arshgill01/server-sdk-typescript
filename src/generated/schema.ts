@@ -4,6 +4,86 @@
  */
 
 export interface paths {
+    "/v2/calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Call
+         * @description Prepare one phone task, then return 202 after durable acceptance. Dialing runs in the background; acceptance does not prove connection or business success. Region and locale are optional or null. Infer region from the phone and spoken locale from task intent and supported regional languages; responses contain the resolved values. Explicit locale is preserved. Conflicting phone/region or ambiguous language returns 422 input_incomplete with details.missing_inputs; phone/region conflicts also include details.fields, region and inferred_region. Unsupported targets return 422 unsupported_region or unsupported_language with details.field, region and locale. Explicit targets are checked before preparation; inferred locale is checked after inference. These rejections create no Call. Unsupported result_schema types, including nullable unions, return 400 result_schema_invalid. Preparation is bounded to 25 seconds; configuration access failures, conflicting profiles, model failures or timeouts return 503 provider_unavailable. Accepted instructions and input are immutable and reused on replay. Calls accept one phone and immediate execution only: no batch recipients, scheduling, recurrence or recipient_result_schema.
+         */
+        post: operations["createAgenticCall"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2/calls/{call_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Call
+         * @description Polling reads persisted state and never performs extraction or initiates a call.
+         */
+        get: operations["getAgenticCall"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2/calls/{call_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Call
+         * @description Cancellation is idempotent for terminal calls. Once provider submission starts, returns 409 call_cannot_cancel; it does not hang up an active call.
+         */
+        post: operations["cancelAgenticCall"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2/calls/{call_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Events
+         * @description Poll durable JSON event pages, not SSE. Events include call.accepted, call.in_progress, call.ringing, call.connected, call.asr, call.speech, call.interrupted, call.dtmf, call.ended, call.result_ready, and call.completed/failed/canceled. Not every call emits every event type. Speech details preserve observed text, speaker, turn and optional occurred_at. ASR may contain partial fragments or revised hypotheses; no is_final flag or final-sentence guarantee is provided. Do not concatenate every update into a transcript. Deduplicate by event ID, not turn or text. Persistence order includes late arrivals; IDs remain stable. Follow next_cursor for additional available pages. Retain the last event ID for later polls even when next_cursor is null, and keep it on empty pages. Empty pages do not mean completion. Existing lifecycle cursors remain valid. Invalid or foreign cursors return 400 invalid_request. Reads do not dial, infer or persist anything.
+         */
+        get: operations["listAgenticCallEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/calls": {
         parameters: {
             query?: never;
@@ -15,7 +95,8 @@ export interface paths {
         put?: never;
         /**
          * Create Call
-         * @description Create an asynchronous call. Use `result_schema` and `recipient_result_schema` to ask CALL-E to extract structured JSON results from terminal call evidence.
+         * @deprecated
+         * @description Create an asynchronous call. Use `result_schema` and `recipient_result_schema` to ask CALL-E to extract structured JSON results from terminal call evidence. Shared platform outbound lines support one phone number per task. Batch calls require an eligible purchased number selected as the account default outbound number; otherwise creation returns `422 call_not_ready`. Account concurrency and LLM token usage are controlled by the effective account configuration. Task concurrency defaults to 1 on shared platform lines and 10 on eligible dedicated purchased numbers; selecting a purchased number as the account default does not make it a shared platform line.
          */
         post: operations["createCall"];
         delete?: never;
@@ -33,6 +114,7 @@ export interface paths {
         };
         /**
          * Get Call
+         * @deprecated
          * @description Get a call by id.
          */
         get: operations["getCall"];
@@ -52,7 +134,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Call Events
+         * List Events
+         * @deprecated
          * @description List developer-facing call events.
          */
         get: operations["listCallEvents"];
@@ -166,10 +249,9 @@ export interface paths {
          *     Goal pointer, dispatch work, or start result materialization. Use the `GoalRun.id` returned
          *     by create as `goal_run_id`; the nested telephone `run_id` is not valid in this path.
          *
-         *     Poll until either `result` or `error` is non-null. A non-null `result` is the parsed object
-         *     validated against the published result schema. A non-null `error` means this Run will not
-         *     produce a result. `status: completed` with both fields null means result processing is still
-         *     in progress.
+         *     Poll while `result_status` is `pending`. A non-null `result` is the parsed object validated
+         *     against the published result schema. `unavailable` means evidence did not support a business
+         *     result; no-answer, busy and declined calls are ordinary `call_outcome` values, not errors.
          */
         get: operations["getGoalRun"];
         put?: never;
@@ -191,7 +273,7 @@ export interface paths {
         put?: never;
         /**
          * Server Message
-         * @description CALL-E sends this request after a call reaches a terminal state and its post-call outcome and requested structured results are finalized. Configure your receiver URL with `webhook_url` when creating a call.
+         * @description CALL-E sends this request after a call reaches a terminal state and its post-call outcome and requested structured results are finalized. Configure this URL with `webhook_url` on create call or through project-level webhook settings.
          */
         post: operations["receiveWebhookEvent"];
         delete?: never;
@@ -204,6 +286,68 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One phone, optional region and spoken locale, and a required Goal-compatible result schema. */
+        CreateAgenticCallRequest: {
+            task: string;
+            phone: string;
+            /** @description Optional destination region. Inferred from the phone when omitted. An explicit region conflicting with the phone requires corrected input. */
+            region?: string | null;
+            /** @description Optional spoken BCP-47 locale. Inferred from task intent and available regional languages when omitted. */
+            locale?: string | null;
+            /** @description Required closed flat JSON Schema using the same calle.result.scalar-object.v1 profile as Goal. At most 32 string, boolean, integer or number properties; additionalProperties must be false. Nested objects, arrays, null values and schema combinators are unsupported. */
+            result_schema: {
+                [key: string]: unknown;
+            };
+            metadata?: {
+                [key: string]: unknown;
+            };
+            webhook_url?: string | null;
+        };
+        /** @description Persisted one-shot snapshot sharing execution, call_outcome and result_status with Goal Run. Poll only while result_status is pending. Completed execution does not imply business success. Terminal webhooks are sent when result_status is no longer pending, including unavailable results. */
+        AgenticCall: {
+            /** @description API Call resource ID. Use this ID for API paths and event correlation, not the telephone ID in Billing. */
+            id: string;
+            /** @description Telephone call ID shown in Billing, using the same identity as Goal Run call_id. Always present; null until recorded, including cancellation before dialing. Independent of business result availability. Does not indicate whether charges have settled. Use id, not this field, for API paths. */
+            call_id: string | null;
+            /** @constant */
+            object: "call";
+            status: components["schemas"]["GoalRunStatus"];
+            call_outcome: components["schemas"]["CallOutcome"];
+            result_status: components["schemas"]["BusinessResultStatus"];
+            /** @description Recorded conversation turns in order, independent of the business result. Always present; empty before terminal execution or when no transcript is available. Never generated from result_schema. */
+            transcript: components["schemas"]["CallTranscriptTurn"][];
+            task: string;
+            phone: string;
+            region: string;
+            locale: string;
+            /** @description Result validated against result_schema and durably persisted. Null while pending, unavailable, not applicable, or on a technical error. Explicit schema-valid task fallbacks are preserved. */
+            result: {
+                [key: string]: components["schemas"]["GoalScalar"];
+            } | null;
+            /** @description Technical execution or result-processing error, or null. No-answer, busy, declined, cancellation and insufficient business evidence do not populate error. */
+            error: components["schemas"]["GoalRunError"] | null;
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description UTC telephone-execution completion time, or `null` while execution is non-terminal.
+             */
+            completed_at: string | null;
+        };
+        /** @description Terminal event for either a legacy v1 call task or an Agentic v2 call. Inspect data.object to distinguish the payload. */
+        TerminalWebhookEvent: components["schemas"]["WebhookEvent"] | components["schemas"]["AgenticWebhookEvent"];
+        /** @description v2 terminal webhook. data is identical to the terminal GET response. A valid call completion can carry a failed custom result. Retries reuse the same event id. */
+        AgenticWebhookEvent: {
+            id: string;
+            /** @enum {string} */
+            type: "call.completed" | "call.failed" | "call.canceled";
+            /** Format: date-time */
+            created_at: string;
+            data: components["schemas"]["AgenticCall"];
+        };
         /**
          * @description Cursor-paginated collection of the authenticated owner's listed, active, published Goal
          *     interfaces. Use this for discovery or recovery of a known Goal id, not as title search.
@@ -306,9 +450,8 @@ export interface components {
             [key: string]: components["schemas"]["GoalScalar"];
         };
         /**
-         * @description Public projection of one phone-specific execution of a published Goal. A non-null `result`
-         *     is a successfully parsed and persisted object. A non-null `error` means the Run will not
-         *     produce a result. When both are null, continue polling.
+         * @description Public projection of one phone-specific execution of a published Goal. Execution, telephone
+         *     outcome and business result readiness are independent. Poll only while result_status is pending.
          */
         GoalRun: {
             /** @enum {string} */
@@ -329,16 +472,20 @@ export interface components {
             /** @description Read-only identity and version of the exact RunSpec pinned by this Run. */
             run_spec: components["schemas"]["GoalRunSpecSnapshot"];
             status: components["schemas"]["GoalRunStatus"];
+            call_outcome: components["schemas"]["CallOutcome"];
+            result_status: components["schemas"]["BusinessResultStatus"];
+            /** @description Recorded conversation turns in order, independent of business result readiness or errors. Always present; empty before terminal execution or when no transcript is available. */
+            transcript: components["schemas"]["CallTranscriptTurn"][];
             /**
              * @description Parsed result validated against the published result schema and durably persisted, or
-             *     `null` while processing or when the Run has an error. Its keys vary by Goal.
+             *     `null` while pending, unavailable, not applicable, or on a technical error. Its keys vary by Goal.
              */
             result: {
                 [key: string]: components["schemas"]["GoalScalar"];
             } | null;
             /**
-             * @description Unified execution or result-processing error, or `null`. Branch on `code`; keep `message`
-             *     for logs and operators. A non-null error is final and is mutually exclusive with `result`.
+             * @description Technical execution or result-processing error, or null. Ordinary telephone outcomes,
+             *     cancellation and insufficient business evidence are represented by call_outcome/result_status.
              */
             error: components["schemas"]["GoalRunError"] | null;
             /**
@@ -360,16 +507,26 @@ export interface components {
             version: number;
         };
         /**
-         * @description Stable telephone execution state. `queued` and `in_progress` are non-terminal; `completed`,
-         *     `failed`, and `canceled` are terminal. A completed call can still have `result: null` and
-         *     `error: null` briefly while CALL-E parses and saves the result.
+         * @description Stable execution state. No-answer, busy and declined calls complete execution normally.
+         *     Technical execution failures are failed; explicit cancellation is canceled. Completed execution
+         *     may still have result_status=pending while its business result is being processed.
          * @enum {string}
          */
         GoalRunStatus: "queued" | "in_progress" | "completed" | "failed" | "canceled";
-        /** @description Unified safe error returned when a Goal Run cannot produce a usable result. */
+        /**
+         * @description Reported telephone outcome, separate from business success and billing connection evidence. Null before a telephone outcome is known or when execution is canceled or fails technically.
+         * @enum {string|null}
+         */
+        CallOutcome: "completed" | "no_answer" | "busy" | "declined" | null;
+        /**
+         * @description Pending means keep polling. Available includes an empty result object. Unavailable means no schema-valid business result could be produced; inspect error for technical failures. Not applicable is used for cancellation and technical execution failure.
+         * @enum {string}
+         */
+        BusinessResultStatus: "pending" | "available" | "unavailable" | "not_applicable";
+        /** @description Technical execution or result-processing error. Ordinary call outcomes are not errors. */
         GoalRunError: {
             /** @enum {string} */
-            code: "call_failed" | "no_answer" | "declined" | "timed_out" | "canceled" | "result_invalid" | "result_unavailable" | "result_failed";
+            code: "call_failed" | "timed_out" | "result_invalid" | "result_failed";
             /** @description Human-readable safe explanation. Do not parse this field for application logic. */
             message: string;
             /** @description Optional low-cardinality diagnostic detail safe for logs or narrow application branching. */
@@ -378,7 +535,7 @@ export interface components {
         CreateCallRequest: {
             /** @description Natural-language instruction for the call task. Include the goal, relevant details the voice agent should know, and the exact information you want collected. */
             task: string;
-            /** @description Optional explicit recipients for this call task. Omit it when the task text already contains the phone targets CALL-E should use. */
+            /** @description Optional explicit recipients for this call task. Omit it when the task text already contains the phone targets CALL-E should use. The default outbound line permits one phone number in total across all recipients. Multiple targets require an eligible purchased outbound number; this also applies to targets inferred from task text. */
             recipients?: components["schemas"]["CallTaskRecipientRequest"][] | null;
             /**
              * @description Optional JSON Schema object that defines the structured result CALL-E should extract for the whole call task.
@@ -414,7 +571,7 @@ export interface components {
             };
             /**
              * Format: uri
-             * @description Optional per-request HTTPS webhook URL. When provided, CALL-E sends terminal call events to this URL after result finalization.
+             * @description Optional per-request HTTPS webhook URL. When provided, CALL-E sends terminal call events to this URL in addition to project-level webhook delivery.
              */
             webhook_url?: string;
         };
@@ -631,7 +788,7 @@ export interface components {
         };
         APIError: {
             /** @enum {string} */
-            code: "invalid_request" | "unauthorized" | "forbidden" | "rate_limit_exceeded" | "insufficient_balance" | "unsupported_region" | "unsupported_language" | "recipient_blocked" | "policy_violation" | "call_not_ready" | "no_recipients" | "invalid_recipient" | "invalid_phone" | "result_schema_invalid" | "recipient_result_schema_invalid" | "idempotency_conflict" | "goal_not_published" | "goal_not_executable" | "goal_not_ready" | "schema_override_not_allowed" | "variables_invalid" | "provider_unavailable" | "internal_error" | "not_found";
+            code: "call_cannot_cancel" | "invalid_request" | "input_incomplete" | "unauthorized" | "forbidden" | "rate_limit_exceeded" | "account_concurrency_exceeded" | "account_concurrency_unavailable" | "llm_token_budget_exceeded" | "llm_token_budget_unavailable" | "insufficient_balance" | "unsupported_region" | "unsupported_language" | "recipient_blocked" | "policy_violation" | "call_not_ready" | "no_recipients" | "invalid_recipient" | "invalid_phone" | "result_schema_invalid" | "recipient_result_schema_invalid" | "idempotency_conflict" | "goal_not_published" | "goal_not_executable" | "goal_not_ready" | "schema_override_not_allowed" | "variables_invalid" | "provider_unavailable" | "internal_error" | "not_found";
             message: string;
             details: {
                 [key: string]: unknown;
@@ -652,7 +809,7 @@ export interface components {
         };
     };
     parameters: {
-        /** @description Stable caller-provided key used to make create-call retries safe. Reusing the same key with the same request returns the original call instead of creating a duplicate. */
+        /** @description Stable caller-provided key used to make create-call retries safe. Reusing the same key with the same request returns the original call instead of creating a duplicate. A persisted creation failure replays its original HTTP status and error body; use a new key for a new attempt after resolving the error. While creation is still in progress, a duplicate returns `409 idempotency_conflict` with `details.reason_code=creation_in_progress`. A different request using the same key returns `409 idempotency_conflict`. */
         IdempotencyKey: string;
         /**
          * @description Required business-stable identity for one logical Goal Run, scoped to the authenticated
@@ -706,11 +863,155 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    createAgenticCall: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Persist one key and the original request per logical call. Same project, authenticated owner, key and input return 202 with the original Call ID and its current saved state, including after completion, failure or cancellation. Replay does not prepare or dial again. An intentionally new call requires a new key. Changes to task, phone, region, locale, result_schema, metadata or webhook_url return 409 idempotency_conflict; JSON object-key order is not significant. Keep omitted region/locale omitted on retries; adding inferred response values changes the input. Concurrent creation returns 409 idempotency_conflict with details.reason_code=creation_in_progress: back off and retry unchanged. A definitive validation rejection before acceptance creates no Call and permits corrected input with the same key. After a timeout or uncertain response, reuse the original key and body, not a new key. Keys must be 1-255 characters after trimming. */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAgenticCallRequest"];
+            };
+        };
+        responses: {
+            /** @description Task prepared and Call durably accepted, or an exact replay returning the same Call ID and current saved state. No duplicate dialing on replay. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgenticCall"];
+                };
+            };
+            400: components["responses"]["ErrorResponse"];
+            401: components["responses"]["ErrorResponse"];
+            402: components["responses"]["ErrorResponse"];
+            403: components["responses"]["ErrorResponse"];
+            /** @description Creation is still in progress, or the key belongs to another request or owner. Do not automatically retry with a new key. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The requested region/locale is unsupported, essential task information is missing, or the request violates calling policy. No Call is created. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            429: components["responses"]["ErrorResponse"];
+            500: components["responses"]["ErrorResponse"];
+            503: components["responses"]["ErrorResponse"];
+        };
+    };
+    getAgenticCall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Developer Call id returned by v2. */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed response. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgenticCall"];
+                };
+            };
+            400: components["responses"]["ErrorResponse"];
+            401: components["responses"]["ErrorResponse"];
+            403: components["responses"]["ErrorResponse"];
+            404: components["responses"]["ErrorResponse"];
+            409: components["responses"]["ErrorResponse"];
+            500: components["responses"]["ErrorResponse"];
+        };
+    };
+    cancelAgenticCall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Developer Call id returned by v2. */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed response. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgenticCall"];
+                };
+            };
+            400: components["responses"]["ErrorResponse"];
+            401: components["responses"]["ErrorResponse"];
+            403: components["responses"]["ErrorResponse"];
+            404: components["responses"]["ErrorResponse"];
+            409: components["responses"]["ErrorResponse"];
+            500: components["responses"]["ErrorResponse"];
+        };
+    };
+    listAgenticCallEvents: {
+        parameters: {
+            query?: {
+                /** @description Opaque next_cursor or last returned event ID; scoped to this call. Retain the saved cursor on an empty page. */
+                cursor?: string;
+                /** @description Page size, 1-100. Invalid or out-of-range values return 400 invalid_request. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Developer Call id returned by v2. */
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed response. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventList"];
+                };
+            };
+            400: components["responses"]["ErrorResponse"];
+            401: components["responses"]["ErrorResponse"];
+            403: components["responses"]["ErrorResponse"];
+            404: components["responses"]["ErrorResponse"];
+            409: components["responses"]["ErrorResponse"];
+            500: components["responses"]["ErrorResponse"];
+        };
+    };
     createCall: {
         parameters: {
             query?: never;
             header?: {
-                /** @description Stable caller-provided key used to make create-call retries safe. Reusing the same key with the same request returns the original call instead of creating a duplicate. */
+                /** @description Stable caller-provided key used to make create-call retries safe. Reusing the same key with the same request returns the original call instead of creating a duplicate. A persisted creation failure replays its original HTTP status and error body; use a new key for a new attempt after resolving the error. While creation is still in progress, a duplicate returns `409 idempotency_conflict` with `details.reason_code=creation_in_progress`. A different request using the same key returns `409 idempotency_conflict`. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -736,8 +1037,42 @@ export interface operations {
             403: components["responses"]["ErrorResponse"];
             409: components["responses"]["ErrorResponse"];
             422: components["responses"]["ErrorResponse"];
-            429: components["responses"]["ErrorResponse"];
+            /** @description An account concurrency limit (`account_concurrency_exceeded`), or LLM token budget (`llm_token_budget_exceeded`) was reached. Account admission is checked before planning. Concurrency errors identify the effective line type and limit. Shared-line errors include KYC and dedicated-number purchase guidance in the message and `details.upgrade`; purchased-line errors ask the user to wait for capacity without another purchase suggestion. Configured limits override the default 1 / 10 values. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": {
+                     *         "code": "account_concurrency_exceeded",
+                     *         "message": "Your default shared line (such as us/all) is at its account concurrency limit of 1. This limit is shared across API, MCP, and Dashboard. Wait for an active task to finish, then retry. For up to 10 concurrent tasks, complete identity verification (KYC), purchase a dedicated phone number, and select the activated number as your default outbound number. [Verify identity and buy a number](https://dashboard.heycall-e.com/account/numbers/buy).",
+                     *         "details": {
+                     *           "line_type": "platform_default",
+                     *           "max_active_tasks": 1,
+                     *           "upgrade": {
+                     *             "max_active_tasks": 10,
+                     *             "kyc_required": true,
+                     *             "purchase_url": "https://dashboard.heycall-e.com/account/numbers/buy"
+                     *           }
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             500: components["responses"]["ErrorResponse"];
+            /** @description The provider or an account control is unavailable (`provider_unavailable`, `account_concurrency_unavailable`, or `llm_token_budget_unavailable`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
         };
     };
     getCall: {
@@ -1002,7 +1337,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["WebhookEvent"];
+                "application/json": components["schemas"]["TerminalWebhookEvent"];
             };
         };
         responses: {
