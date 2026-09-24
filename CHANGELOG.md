@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `createAndWait` attaches `callId` when the wait-phase GET fails after a
+  successful create, including response body and JSON parsing failures.
+- Fetch rejections are mapped to `CalleConnectionError` instead of a raw
+  `TypeError`.
+
 ## [1.0.1] - 2026-09-23
 
 ### Fixed
@@ -25,13 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stop Calls and Goal Run wait helpers when result readiness is final, including unavailable results with no error.
 - This is a breaking Calls migration. Retain SDK 0.7.x for historical legacy call-task IDs; see the public migration guide.
 - Clarify webhook configuration, legacy batch-call requirements, and redaction of credentials and private call data.
-
-### Fixed
-
-- `createAndWait` attaches `callId` when the wait-phase GET fails after a
-  successful create, including response body and JSON parsing failures.
-- Fetch rejections are mapped to `CalleConnectionError` instead of a raw
-  `TypeError`.
 
 ## [0.7.1] - 2026-09-03
 

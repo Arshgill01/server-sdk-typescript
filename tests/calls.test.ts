@@ -213,13 +213,14 @@ describe("CalleClient calls", () => {
     await expect(
       client.calls.create({
         task: "Call.",
-        recipient: { phone: "+14155550100", region: "US", locale: "en-US" }
-      })
+        phone: "+14155550100", region: "US", locale: "en-US",
+        resultSchema: { type: "object", additionalProperties: false, properties: {} }
+      }, { idempotencyKey: "wf_123" })
     ).rejects.toBeInstanceOf(CalleConnectionError);
   });
 
   it("attaches callId when createAndWait GET rejects after create", async () => {
-    const queued = { ...completedCall, status: "queued", structured_result: null, completed_at: null };
+    const queued = { ...completedCall, status: "queued", call_outcome: null, result_status: "pending", result: null, completed_at: null };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(queued))
@@ -230,9 +231,10 @@ describe("CalleClient calls", () => {
       client.calls.createAndWait(
         {
           task: "Call.",
-          recipient: { phone: "+14155550100", region: "US", locale: "en-US" }
+          phone: "+14155550100", region: "US", locale: "en-US",
+          resultSchema: { type: "object", additionalProperties: false, properties: {} }
         },
-        { intervalMs: 1, timeoutMs: 500 }
+        { idempotencyKey: "wf_123", intervalMs: 1, timeoutMs: 500 }
       )
     ).rejects.toMatchObject({
       name: "CalleConnectionError",
@@ -247,11 +249,15 @@ describe("CalleClient calls", () => {
           start(controller) { controller.error(new TypeError("body read failed")); }
         }));
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ ...completedCall, status: "queued" }))
+      .mockResolvedValueOnce(jsonResponse({ ...completedCall, status: "queued", call_outcome: null, result_status: "pending", result: null, completed_at: null }))
       .mockResolvedValueOnce(response);
     const client = new CalleClient({ apiKey: "key_test", baseUrl: "https://api.heycall-e.com", fetch: fetchMock });
 
-    await expect(client.calls.createAndWait({ task: "Call." })).rejects.toMatchObject({
+    await expect(client.calls.createAndWait({
+      task: "Call.",
+      phone: "+14155550100", region: "US", locale: "en-US",
+      resultSchema: { type: "object", additionalProperties: false, properties: {} }
+    }, { idempotencyKey: "wf_123" })).rejects.toMatchObject({
       name: "CalleConnectionError",
       callId: "call_123"
     });
@@ -260,7 +266,7 @@ describe("CalleClient calls", () => {
   });
 
   it("attaches callId when createAndWait GET returns an API error", async () => {
-    const queued = { ...completedCall, status: "queued", structured_result: null, completed_at: null };
+    const queued = { ...completedCall, status: "queued", call_outcome: null, result_status: "pending", result: null, completed_at: null };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(queued))
@@ -273,9 +279,10 @@ describe("CalleClient calls", () => {
       client.calls.createAndWait(
         {
           task: "Call.",
-          recipient: { phone: "+14155550100", region: "US", locale: "en-US" }
+          phone: "+14155550100", region: "US", locale: "en-US",
+          resultSchema: { type: "object", additionalProperties: false, properties: {} }
         },
-        { intervalMs: 1, timeoutMs: 500 }
+        { idempotencyKey: "wf_123", intervalMs: 1, timeoutMs: 500 }
       )
     ).rejects.toMatchObject({
       name: "CalleAPIError",
