@@ -14,8 +14,9 @@ workflow. Configure the trusted publisher on npm with:
 - Environment name: `npm`
 - Allowed action: `npm publish`
 
-The GitHub `npm` environment should require maintainer approval and allow
-deployments only from `main` and `v*` release tags. The publish job uses OIDC
+The GitHub `npm` environment has no required reviewers and allows deployments
+only from `main` and `v*` release tags. Publishing a versioned GitHub Release
+starts publication automatically after validation. The publish job uses OIDC
 and does not read a long-lived npm token. `NPM_TOKEN` is retained only for the
 separate, manually invoked dist-tag management workflow.
 
@@ -55,9 +56,13 @@ release. Package publication and manual dist-tag changes share one concurrency
 lock.
 
 The build job validates and packs once, then uploads exactly one tarball and a
-SHA-256 manifest. After environment approval, the publish job downloads that
+SHA-256 manifest. After validation, the publish job downloads that
 artifact and rechecks its file set, checksum, package version, and MIT license
 before publishing it with the `latest` dist-tag.
+
+Every build dry-runs publication from the same nested artifact directory used
+by the publish job. Prefix local tarball paths with `./` (or use an absolute
+path): npm can interpret `artifact/package.tgz` as GitHub shorthand.
 
 ## Test API Goal smoke
 
@@ -77,13 +82,14 @@ pnpm run example:goal-run
 This smoke test creates a real phone call. Use an authorized test number and a
 new idempotency key for a new logical test. Reuse the same key only when
 retrying that exact request. Record the returned Goal Run id and verify that
-exactly one of `result` or `error` is non-null.
+`result_status` is no longer `pending`; an unavailable result may have both `result` and `error` null.
 
 ## Post-publish verification
 
-The workflow waits for exact-version registry metadata, installs the published
-package in a temporary project, imports `CalleClient`, and runs the packaged
-CLI help command.
+The workflow polls registry metadata and installation availability at ten-second
+intervals for up to 30 attempts each. Checks prefer fresh registry responses
+over cached preflight metadata. It installs the published package in a temporary
+project, imports `CalleClient`, and runs the packaged CLI help command.
 
 A failure in either post-publish check does not mean publication failed. If the
 `npm publish` step succeeded, do not retry the same version. Check the registry

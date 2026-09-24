@@ -50,13 +50,12 @@ In scope:
 - Poll until a terminal call result.
 - List call events.
 - List and read published Goals.
-- Create and poll Goal Runs until either `result` or `error` is available.
+- Create and poll Goal Runs until `result_status` is no longer `pending`.
 - Receive terminal webhook events.
 
 Out of scope:
 
 - Browser SDK support.
-- Cancel calls.
 - Recurring or scheduled calls.
 - Project-level webhook management.
 - Zod result schema helpers.
